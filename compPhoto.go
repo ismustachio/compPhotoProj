@@ -14,12 +14,11 @@ import (
 	"image/png"
 	"io/ioutil"
 	"log"
+	"os"
 	"path"
 	"path/filepath"
-
-	//"math"
-	"os"
-	//	"strings"
+	"sync"
+	"time"
 )
 
 type filter func(int, int, color.Color, *image.RGBA)
@@ -86,12 +85,11 @@ func Gray(x int, y int, p color.Color, out *image.RGBA) {
 	b := float64(c.B) * 0.90722
 	grey := uint8((r + g + b) / 3)
 	col := color.RGBA{R: grey, G: grey, B: grey, A: c.A}
-	fmt.Println(x)
-	fmt.Println(y)
 	out.Set(x, y, col)
 }
-var operationMap = map[string]bool{"bilinearKernel": true, "boxKernel": true, "gaussianKernel": true, "grayscale": true, "simpleblur": true, "sobelkernel": true}
 
+var operationMap = map[string]bool{"bilinearKernel": true, "boxKernel": true, "gaussianKernel": true, "grayscale": true, "simpleblur": true, "sobelkernel": true}
+var sema = make(chan struct{}, 20)
 var fpath = flag.String("p", ".", "path to single image or directory with images")
 var all = flag.Bool("a", false, "apply all kernels")
 var operation = flag.String("f", "", "bilinearKernel\nboxKernel\ngaussianKernel\ngrayscale\nsimpleblur\nsobelkernel")
@@ -108,74 +106,70 @@ func main() {
 	}
 	roots := []string{*fpath}
 	fileNames := make(chan string)
+	t0 := time.Now()
+	go spinner(100 * time.Millisecond)
 	switch mode := fi.Mode(); {
 	case mode.IsDir():
+		var n sync.WaitGroup
+		for _, root := range roots {
+			n.Add(1)
+			go walkDir(root, &n, fileNames)
+		}
 		go func() {
-			for _, root := range roots {
-				walkDir(root, fileNames)
-			}
+			n.Wait()
 			close(fileNames)
 		}()
-		for name := range fileNames {
-			reader, err := os.Open(name)
-			if err != nil {
-				log.Fatal(err)
-			}
-			defer reader.Close()
-			img, format, err := image.Decode(reader)
-			if err != nil {
-				log.Fatal(err)
-			}
-			fil := filepath.Base(name)
-			switch *operation {
-			case "grayscale":
-				ApplyFilter(img, fil, format, Gray)
-			case "gaussianKernel":
-				ApplyFilter(img, fil, format, Gauss)
-			case "boxKernel":
-				ApplyFilter(img, fil, format, Box)
-			case "sobelkernel":
-				//ApplyFilter(img,fil, format,Box)
+	loop:
+		for {
+			select {
+			case name, ok := <-fileNames:
+				if !ok {
+					break loop
+				}
+				switch *operation {
+				case "grayscale":
+					ApplyFilter(name, Gray)
+				case "gaussianKernel":
+					ApplyFilter(name, Gauss)
+				case "boxKernel":
+					ApplyFilter(name, Box)
+				}
 			}
 		}
+
 	default:
-		reader, err := os.Open(*fpath)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer reader.Close()
-		img, format, err := image.Decode(reader)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fil := filepath.Base(*fpath)
 		if !*all {
 			switch *operation {
 			case "grayscale":
-				ApplyFilter(img, fil, format, Gray)
+				ApplyFilter(filepath.Base(*fpath), Gray)
 			case "gaussianKernel":
-				ApplyFilter(img, fil, format, Gauss)
+				ApplyFilter(filepath.Base(*fpath), Gauss)
 			case "boxKernel":
-				ApplyFilter(img, fil, format, Box)
+				ApplyFilter(filepath.Base(*fpath), Box)
 			case "sobelkernel":
-				//ApplyFilter(img,fil, format,Box)
+				//ApplyFilter(filepath.Base(*fpath),Box)
 			default:
 				fmt.Println("Invalid Kernel Filter selected")
 			}
 		} else {
-			ApplyFilter(img, fil, format, Gray)
-			ApplyFilter(img, fil, format, Gauss)
-			ApplyFilter(img, fil, format, Box)
-			//BoxFilter(img, format)
+			ApplyFilter(filepath.Base(*fpath), Gray)
+			ApplyFilter(filepath.Base(*fpath), Gauss)
+			ApplyFilter(filepath.Base(*fpath), Box)
+			//BoxFilter(filepath.Base(*fpath),format)
 		}
 	}
+	t1 := time.Now()
+	fmt.Println("Done!")
+	fmt.Printf("Total Elapsed time: %v.\n", t1.Sub(t0))
 }
 
-func walkDir(dir string, filenames chan<- string) {
+func walkDir(dir string, n *sync.WaitGroup, filenames chan<- string) {
+	defer n.Done()
 	for _, entry := range dirent(dir) {
 		if entry.IsDir() {
+			n.Add(1)
 			subdir := filepath.Join(dir, entry.Name())
-			walkDir(subdir, filenames)
+			walkDir(subdir, n, filenames)
 		} else {
 			filenames <- path.Join(dir, entry.Name())
 		}
@@ -183,6 +177,8 @@ func walkDir(dir string, filenames chan<- string) {
 }
 
 func dirent(dir string) []os.FileInfo {
+	sema <- struct{}{}
+	defer func() { <-sema }()
 	entries, err := ioutil.ReadDir(dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -191,7 +187,17 @@ func dirent(dir string) []os.FileInfo {
 	return entries
 }
 
-func ApplyFilter(img image.Image, name string, format string, fn filter) {
+func ApplyFilter(name string, fn filter) {
+	reader, err := os.Open(name)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer reader.Close()
+	img, format, err := image.Decode(reader)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	stX := img.Bounds().Size().X
 	stY := img.Bounds().Size().Y
 	x := 0
@@ -220,7 +226,7 @@ func writeImageFile(img image.Image, name string, format string) {
 			log.Fatal(err)
 		}
 	}
-	f, err := os.Create(path.Join(np, name))
+	f, err := os.Create(path.Join(np, filepath.Base(name)))
 	if err != nil {
 		fmt.Println("Create")
 		log.Fatal(err)
@@ -232,4 +238,13 @@ func writeImageFile(img image.Image, name string, format string) {
 		png.Encode(f, img)
 	}
 
+}
+
+func spinner(delay time.Duration) {
+	for {
+		for _, r := range `-\|/` {
+			fmt.Printf("\r%c", r)
+			time.Sleep(delay)
+		}
+	}
 }
