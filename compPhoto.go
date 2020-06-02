@@ -93,6 +93,7 @@ var sema = make(chan struct{}, 20)
 var fpath = flag.String("p", ".", "path to single image or directory with images")
 var all = flag.Bool("a", false, "apply all kernels")
 var operation = flag.String("f", "", "bilinearKernel\nboxKernel\ngaussianKernel\ngrayscale\nsimpleblur\nsobelkernel")
+var runTime = flag.Int("r", 4, "times to run the given convulotion")
 
 func main() {
 	flag.Parse()
@@ -202,14 +203,18 @@ func ApplyFilter(name string, fn filter) {
 	stY := img.Bounds().Size().Y
 	x := 0
 	y := 0
+	i := 0
 	out := image.NewRGBA(image.Rect(0, 0, stX, stY))
-	for x < stX {
-		for y < stY {
-			fn(x, y, img.At(x, y), out)
-			y++
+	for i < *runTime {
+		for x < stX {
+			for y < stY {
+				fn(x, y, img.At(x, y), out)
+				y++
+			}
+			y = 0
+			x++
 		}
-		y = 0
-		x++
+		i++
 	}
 	writeImageFile(out, name, format)
 }
