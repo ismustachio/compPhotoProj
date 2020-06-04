@@ -17,90 +17,90 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
-type filter func(int, int, color.Color, *image.RGBA)
+type kernels int
 
-func Gauss(x int, y int, p color.Color, out *image.RGBA) {
-	k := [][]float64{
-		{0.00390625, 0.015625, 0.0234375, 0.015625, 0.00390625},
-		{0.015625, 0.0625, 0.09375, 0.0625, 0.015625},
-		{0.0234375, 0.09375, 0.140625, 0.09375, 0.0234375},
-		{0.015625, 0.0625, 0.09375, 0.0625, 0.015625},
-		{0.00390625, 0.015625, 0.0234375, 0.015625, 0.00390625}}
-	c := color.RGBAModel.Convert(p).(color.RGBA)
-	r := 0.0
-	g := 0.0
-	b := 0.0
-	a := 0.0
-	i := len(k) - 1
-	j := i
-	for i > 0 {
-		for j > 0 {
-			r += float64(c.R) * k[j][i]
-			g += float64(c.G) * k[j][i]
-			b += float64(c.B) * k[j][i]
-			a += float64(c.A) * k[j][i]
-			j--
-		}
-		j = len(k[0]) - 1
-		i--
-	}
-	out.Set(x, y, color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: uint8(a)})
-}
+const (
+	Blur kernels = iota
+	BSobel
+	LSobel
+	RSobel
+	TSobel
+	Emboss
+	Identity
+	Outline
+	Sharp
+	GrayScale
+	Gaussian
+	Custom
+)
 
-func Box(x int, y int, p color.Color, out *image.RGBA) {
-	k := [][]float64{
-		{.9, .9, .9},
-		{.9, .9, .9},
-		{.9, .9, .9},
-	}
-	c := color.RGBAModel.Convert(p).(color.RGBA)
+type filter func(int, int, image.Image, *image.RGBA, [][]float64)
+
+func Filter(x int, y int, img image.Image, out *image.RGBA, k [][]float64) {
 	r := 0.0
 	g := 0.0
 	b := 0.0
 	a := 0.0
 	i := 0
 	j := 0
-	for i < len(k) {
-		for j < len(k[0]) {
-			r += float64(c.R) * k[i][j]
-			g += float64(c.G) * k[i][j]
-			b += float64(c.B) * k[i][j]
-			a += float64(c.A) * k[i][j]
-			j++
+	off := len(k) / 2
+	st := 0
+	for st < *runTime {
+		for i < len(k) {
+			for j < len(k[0]) {
+				c := color.RGBAModel.Convert(img.At(x+i-off, y+j-off)).(color.RGBA)
+				r += float64(c.R) * k[i][j]
+				g += float64(c.G) * k[i][j]
+				b += float64(c.B) * k[i][j]
+				a += float64(c.A) * k[i][j]
+				j++
+			}
+			j = 0
+			i++
 		}
-		j = 0
-		i++
 	}
-	out.Set(x, y, color.RGBA{R: uint8(r / float64(len(k)*2)), G: uint8(g / float64(len(k)*2)), B: uint8(b / float64(len(k)*2)), A: uint8(a / float64(len(k)*2))})
+	out.Set(x, y, color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: uint8(a)})
 }
 
-func Gray(x int, y int, p color.Color, out *image.RGBA) {
-	c := color.RGBAModel.Convert(p).(color.RGBA)
-	r := float64(c.R) * 0.92126
-	g := float64(c.G) * 0.97152
-	b := float64(c.B) * 0.90722
-	grey := uint8((r + g + b) / 3)
-	col := color.RGBA{R: grey, G: grey, B: grey, A: c.A}
-	out.Set(x, y, col)
+func Gray(img image.Image,f string,format string) int {
+	stX := img.Bounds().Size().X
+	stY := img.Bounds().Size().Y
+	x := 0
+	y := 0
+	out := image.NewRGBA(image.Rect(0, 0, stX, stY))
+	for x < stX {
+		for y < stY {
+			c := color.RGBAModel.Convert(img.At(x,y)).(color.RGBA)
+			r := float64(c.R) * 0.92126
+			g := float64(c.G) * 0.97152
+			b := float64(c.B) * 0.90722
+			grey := uint8((r + g + b) / 3)
+			col := color.RGBA{R: grey, G: grey, B: grey, A: c.A}
+			out.Set(x, y, col)
+			y++
+		}
+		y = 0
+		x++
+	}
+	writeImageFile(out, f, format)
+	return 1
 }
 
-var operationMap = map[string]bool{"bilinearKernel": true, "boxKernel": true, "gaussianKernel": true, "grayscale": true, "simpleblur": true, "sobelkernel": true}
 var sema = make(chan struct{}, 20)
 var fpath = flag.String("p", ".", "path to single image or directory with images")
-var all = flag.Bool("a", false, "apply all kernels")
-var operation = flag.String("f", "", "bilinearKernel\nboxKernel\ngaussianKernel\ngrayscale\nsimpleblur\nsobelkernel")
-var runTime = flag.Int("r", 4, "times to run the given convulotion")
+var operation = flag.String("f", "", "Avaliable kernel's: \n[LRTB]Sobel\nBlur\nSharp\nOutline\nIdentity\nEmboss\nAvaliable Image Transformation:\nGrayScale")
+var runTime = flag.Int("r", 1, "times to run the given convulotion kernel")
+var custom = flag.String("c", "", "Use custom 3x3 matrix. Ex: -c '3 2 -1 8 9 2 1 -9 1' ")
 
 func main() {
 	flag.Parse()
-	_, ok := operationMap[*operation]
-	if !ok {
-		flag.Usage()
-	}
+	total := 0
 	fi, err := os.Stat(*fpath)
 	if err != nil {
 		log.Fatal(err)
@@ -109,6 +109,43 @@ func main() {
 	fileNames := make(chan string)
 	t0 := time.Now()
 	go spinner(100 * time.Millisecond)
+	k := Identity
+	if *custom != "" {
+		if len(strings.Split(*custom, " ")) != 9 {
+			flag.Usage()
+			return
+		}
+		k = Custom
+	} else {
+		switch *operation {
+		case "LSobel":
+			k = LSobel
+		case "RSobel":
+			k = RSobel
+		case "TSobel":
+			k = TSobel
+		case "BSobel":
+			k = BSobel
+		case "Emboss":
+			k = Emboss
+		case "Identity":
+			k = Identity
+		case "Outline":
+			k = Outline
+		case "Sharp":
+			k = Sharp
+		case "GrayScale":
+			k = GrayScale
+		case "Gaussian":
+			k = Gaussian
+		case "Blur":
+			k = Blur
+		default:
+			flag.Usage()
+			return
+		}
+	}
+	kk := kernel(k)
 	switch mode := fi.Mode(); {
 	case mode.IsDir():
 		var n sync.WaitGroup
@@ -120,48 +157,97 @@ func main() {
 			n.Wait()
 			close(fileNames)
 		}()
-	loop:
-		for {
-			select {
-			case name, ok := <-fileNames:
-				if !ok {
-					break loop
-				}
-				switch *operation {
-				case "grayscale":
-					ApplyFilter(name, Gray)
-				case "gaussianKernel":
-					ApplyFilter(name, Gauss)
-				case "boxKernel":
-					ApplyFilter(name, Box)
-				}
-			}
-		}
-
+			total = ApplyFilter(fileNames, kk, Filter)
 	default:
-		if !*all {
-			switch *operation {
-			case "grayscale":
-				ApplyFilter(filepath.Base(*fpath), Gray)
-			case "gaussianKernel":
-				ApplyFilter(filepath.Base(*fpath), Gauss)
-			case "boxKernel":
-				ApplyFilter(filepath.Base(*fpath), Box)
-			case "sobelkernel":
-				//ApplyFilter(filepath.Base(*fpath),Box)
-			default:
-				fmt.Println("Invalid Kernel Filter selected")
-			}
-		} else {
-			ApplyFilter(filepath.Base(*fpath), Gray)
-			ApplyFilter(filepath.Base(*fpath), Gauss)
-			ApplyFilter(filepath.Base(*fpath), Box)
-			//BoxFilter(filepath.Base(*fpath),format)
-		}
+		total = singleImage(*fpath, kk, Filter)
 	}
+	fmt.Println("Total files: ", total)
 	t1 := time.Now()
 	fmt.Println("Done!")
 	fmt.Printf("Total Elapsed time: %v.\n", t1.Sub(t0))
+}
+
+func singleImage(f string, k [][]float64, fn filter) int {
+	img, format, err := extractImage(f)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if *operation == "GrayScale" {
+		Gray(img,f,format)
+	} else {
+		convolutionSingle(img, k, fn, f, format)
+	}
+	return 1
+}
+
+func kernel(k kernels) [][]float64 {
+	out := make([][]float64, 3)
+	for k, _ := range out {
+		out[k] = make([]float64, 3)
+	}
+	switch k {
+	case BSobel:
+		out = [][]float64{{-1, -2, -1}, {0, 0, 0}, {1, 2, 1}}
+	case LSobel:
+		out = [][]float64{{1, 0, -1}, {2, 0, -2}, {1, 0, -1}}
+	case RSobel:
+		out = [][]float64{{-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1}}
+	case TSobel:
+		out = [][]float64{{1, 2, 1}, {0, 0, 0}, {-1, -2, -1}}
+	case Emboss:
+		out = [][]float64{{-2, -1, 0}, {-1, 1, 1}, {0, 1, 2}}
+	case Identity:
+		out = [][]float64{{0, 0, 0}, {0, 1, 0}, {0, 0, 0}}
+	case Outline:
+		out = [][]float64{{-1, -1, -1}, {-1, 8, -1}, {-1, -1, -1}}
+	case Sharp:
+		out = [][]float64{{0, -.6, 0}, {-.6, 3, -.6}, {0, -.6, 0}}
+	case Blur:
+		out = [][]float64{{.0625, .125, .0625}, {.125, .25, .125}, {.0625, .125, .0625}}
+	case Gaussian:
+		out = [][]float64{{0.00390625, 0.015625, 0.0234375, 0.015625, 0.00390625}, {0.015625, 0.0625, 0.09375, 0.0625, 0.015625}, {0.0234375, 0.09375, 0.140625, 0.09375, 0.0234375}, {0.015625, 0.0625, 0.09375, 0.0625, 0.015625},
+			{0.00390625, 0.015625, 0.0234375, 0.015625, 0.00390625}}
+	case Custom:
+		spl := strings.Split(*custom, " ")
+		a, err := strconv.ParseFloat(spl[0], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		b, err := strconv.ParseFloat(spl[1], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		c, err := strconv.ParseFloat(spl[2], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		d, err := strconv.ParseFloat(spl[3], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		e, err := strconv.ParseFloat(spl[4], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		f, err := strconv.ParseFloat(spl[5], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		g, err := strconv.ParseFloat(spl[6], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		h, err := strconv.ParseFloat(spl[7], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		i, err := strconv.ParseFloat(spl[8], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		out = [][]float64{{a, b, c}, {d, e, f}, {g, h, i}}
+	}
+	return out
 }
 
 func walkDir(dir string, n *sync.WaitGroup, filenames chan<- string) {
@@ -188,27 +274,54 @@ func dirent(dir string) []os.FileInfo {
 	return entries
 }
 
-func ApplyFilter(name string, fn filter) {
-	reader, err := os.Open(name)
+func extractImage(f string) (image.Image, string, error) {
+	reader, err := os.Open(f)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return nil, "", err
 	}
 	defer reader.Close()
 	img, format, err := image.Decode(reader)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return nil, "", err
 	}
+	return img, format, nil
+}
 
-	stX := img.Bounds().Size().X
-	stY := img.Bounds().Size().Y
-	x := 0
-	y := 0
+func convolutionChannel(img image.Image, k [][]float64, fn filter, name string, format string, count chan int) {
+	x := len(k) / 2
+	y := x
+	stX := img.Bounds().Size().X - x
+	stY := img.Bounds().Size().Y - x
 	i := 0
 	out := image.NewRGBA(image.Rect(0, 0, stX, stY))
 	for i < *runTime {
 		for x < stX {
 			for y < stY {
-				fn(x, y, img.At(x, y), out)
+				fn(x, y, img, out, k)
+				y++
+			}
+			y = 0
+			x++
+		}
+		i++
+		count <- i
+	}
+	writeImageFile(out, name, format)
+}
+
+func convolutionSingle(img image.Image, k [][]float64, fn filter, name string, format string) {
+	x := len(k) / 2
+	y := x
+	stX := img.Bounds().Size().X - x
+	stY := img.Bounds().Size().Y - x
+	i := 0
+	out := image.NewRGBA(image.Rect(0, 0, stX, stY))
+	for i < *runTime {
+		for x < stX {
+			for y < stY {
+				fn(x, y, img, out, k)
 				y++
 			}
 			y = 0
@@ -217,6 +330,36 @@ func ApplyFilter(name string, fn filter) {
 		i++
 	}
 	writeImageFile(out, name, format)
+}
+
+func ApplyFilter(name <-chan string, k [][]float64, fn filter) int {
+	count := make(chan int)
+	var wg sync.WaitGroup //num of go routines
+	for f := range name {
+		wg.Add(1)
+		//worker
+		go func(f string) {
+			defer wg.Done()
+			img, format, err := extractImage(f)
+			if err == nil {
+				if *operation == "GrayScale" {
+					count <- Gray(img,f,format)
+				} else {
+					convolutionChannel(img, k, fn, f, format, count)
+				}
+			}
+		}(f)
+	}
+	//closer
+	go func() {
+		wg.Wait()
+		close(count)
+	}()
+	var total int
+	for tot := range count {
+		total += tot
+	}
+	return total
 }
 
 func writeImageFile(img image.Image, name string, format string) {
