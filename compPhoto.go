@@ -1,10 +1,14 @@
 //Author: Armando Lajara
 //Email: alajara@pdx.edu
 
+// Computational Photography Project
+// This project attempts to act as a command-line utility, image filter.
+// To maxize this utility, it is best to run against large quantaties of // images. This utility will spawned a thread (goroutine) per each image
+// using all available system resources.
+
 package main
 
 import (
-	//"encoding/base64"
 	"flag"
 	"fmt"
 	"image"
@@ -64,29 +68,34 @@ func Filter(x int, y int, img image.Image, out *image.RGBA, k [][]float64) {
 			j = 0
 			i++
 		}
+		st++
 	}
 	out.Set(x, y, color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: uint8(a)})
 }
 
-func Gray(img image.Image,f string,format string) int {
+func Gray(img image.Image, f string, format string) int {
 	stX := img.Bounds().Size().X
 	stY := img.Bounds().Size().Y
 	x := 0
 	y := 0
+	i := 0
 	out := image.NewRGBA(image.Rect(0, 0, stX, stY))
-	for x < stX {
-		for y < stY {
-			c := color.RGBAModel.Convert(img.At(x,y)).(color.RGBA)
-			r := float64(c.R) * 0.92126
-			g := float64(c.G) * 0.97152
-			b := float64(c.B) * 0.90722
-			grey := uint8((r + g + b) / 3)
-			col := color.RGBA{R: grey, G: grey, B: grey, A: c.A}
-			out.Set(x, y, col)
-			y++
+	for i < *runTime {
+		for x < stX {
+			for y < stY {
+				c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
+				r := float64(c.R) * 0.92126
+				g := float64(c.G) * 0.97152
+				b := float64(c.B) * 0.90722
+				grey := uint8((r + g + b) / 3)
+				col := color.RGBA{R: grey, G: grey, B: grey, A: c.A}
+				out.Set(x, y, col)
+				y++
+			}
+			y = 0
+			x++
 		}
-		y = 0
-		x++
+		i++
 	}
 	writeImageFile(out, f, format)
 	return 1
@@ -157,7 +166,7 @@ func main() {
 			n.Wait()
 			close(fileNames)
 		}()
-			total = ApplyFilter(fileNames, kk, Filter)
+		total = ApplyFilter(fileNames, kk, Filter)
 	default:
 		total = singleImage(*fpath, kk, Filter)
 	}
@@ -173,7 +182,7 @@ func singleImage(f string, k [][]float64, fn filter) int {
 		log.Fatal(err)
 	}
 	if *operation == "GrayScale" {
-		Gray(img,f,format)
+		Gray(img, f, format)
 	} else {
 		convolutionSingle(img, k, fn, f, format)
 	}
@@ -294,19 +303,15 @@ func convolutionChannel(img image.Image, k [][]float64, fn filter, name string, 
 	y := x
 	stX := img.Bounds().Size().X - x
 	stY := img.Bounds().Size().Y - x
-	i := 0
 	out := image.NewRGBA(image.Rect(0, 0, stX, stY))
-	for i < *runTime {
-		for x < stX {
-			for y < stY {
-				fn(x, y, img, out, k)
-				y++
-			}
-			y = 0
-			x++
+	for x < stX {
+		for y < stY {
+			fn(x, y, img, out, k)
+			y++
 		}
-		i++
-		count <- i
+		y = 0
+		x++
+		count <- 1
 	}
 	writeImageFile(out, name, format)
 }
@@ -316,18 +321,14 @@ func convolutionSingle(img image.Image, k [][]float64, fn filter, name string, f
 	y := x
 	stX := img.Bounds().Size().X - x
 	stY := img.Bounds().Size().Y - x
-	i := 0
 	out := image.NewRGBA(image.Rect(0, 0, stX, stY))
-	for i < *runTime {
-		for x < stX {
-			for y < stY {
-				fn(x, y, img, out, k)
-				y++
-			}
-			y = 0
-			x++
+	for x < stX {
+		for y < stY {
+			fn(x, y, img, out, k)
+			y++
 		}
-		i++
+		y = 0
+		x++
 	}
 	writeImageFile(out, name, format)
 }
@@ -343,7 +344,7 @@ func ApplyFilter(name <-chan string, k [][]float64, fn filter) int {
 			img, format, err := extractImage(f)
 			if err == nil {
 				if *operation == "GrayScale" {
-					count <- Gray(img,f,format)
+					count <- Gray(img, f, format)
 				} else {
 					convolutionChannel(img, k, fn, f, format, count)
 				}
@@ -376,7 +377,6 @@ func writeImageFile(img image.Image, name string, format string) {
 	}
 	f, err := os.Create(path.Join(np, filepath.Base(name)))
 	if err != nil {
-		fmt.Println("Create")
 		log.Fatal(err)
 	}
 	defer f.Close()
