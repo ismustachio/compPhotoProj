@@ -1,4 +1,6 @@
+<h1>
 Computational Photography Project
+</h1>
 This project attempts to act as a command-line utility, image filter,
 application. The program has the following avaliable image filter:
 	LeftSobel
