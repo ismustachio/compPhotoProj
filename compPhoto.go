@@ -97,6 +97,7 @@ func Gray(img image.Image, f string, format string) int {
 	return 1
 }
 
+//counting semaphore, limits concurrency in retrieving files
 var sema = make(chan struct{}, 20)
 var fpath = flag.String("p", ".", "path to single image or directory with images")
 var operation = flag.String("f", "", "Available kernel's: \n[LRTB]Sobel\nBlur\nGaussian\nSharp\nOutline\nIdentity\nEmboss\nAvailable Image Transformation:\nGrayScale")
@@ -269,8 +270,8 @@ func walkDir(dir string, n *sync.WaitGroup, filenames chan<- string) {
 }
 
 func dirent(dir string) []os.FileInfo {
-	sema <- struct{}{}
-	defer func() { <-sema }()
+	sema <- struct{}{}        //get token
+	defer func() { <-sema }() //release token
 	entries, err := ioutil.ReadDir(dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
