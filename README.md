@@ -23,8 +23,14 @@ large quantaties of images. This utility will spawned a thread
 
 <p>
 Example Usage:
+	<ol>
   ./compPhoto -p image.png 	-f Emboss -r 3
+		</ol>
+		<ol>
   ./compPhoto -p ./testImages/ -f Identity
+	</ol>
+	<ol>
   ./compPhoto -p image1.png -c '.3 .2 -1 0 1 1 .8 .2 .2' -r 10
+  </ol>
 </p>
 
