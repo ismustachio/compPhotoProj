@@ -55,20 +55,20 @@ func Filter(x int, y int, img image.Image, out *image.RGBA, k [][]float64) {
 	j := 0
 	off := len(k) / 2
 	st := 0
-	for st < *runTime {
-		for i < len(k) {
-			for j < len(k[0]) {
-				c := color.RGBAModel.Convert(img.At(x+i-off, y+j-off)).(color.RGBA)
+	for i < len(k) {
+		for j < len(k[0]) {
+			c := color.RGBAModel.Convert(img.At(x+i-off, y+j-off)).(color.RGBA)
+			for st < *runTime {
 				r += float64(c.R) * k[i][j]
 				g += float64(c.G) * k[i][j]
 				b += float64(c.B) * k[i][j]
 				a += float64(c.A) * k[i][j]
-				j++
+				st++
 			}
-			j = 0
-			i++
+			j++
 		}
-		st++
+		j = 0
+		i++
 	}
 	out.Set(x, y, color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: uint8(a)})
 }
@@ -78,24 +78,20 @@ func Gray(img image.Image, f string, format string) int {
 	stY := img.Bounds().Size().Y
 	x := 0
 	y := 0
-	i := 0
 	out := image.NewRGBA(image.Rect(0, 0, stX, stY))
-	for i < *runTime {
-		for x < stX {
-			for y < stY {
-				c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
-				r := float64(c.R) * 0.92126
-				g := float64(c.G) * 0.97152
-				b := float64(c.B) * 0.90722
-				grey := uint8((r + g + b) / 3)
-				col := color.RGBA{R: grey, G: grey, B: grey, A: c.A}
-				out.Set(x, y, col)
-				y++
-			}
-			y = 0
-			x++
+	for x < stX {
+		for y < stY {
+			c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
+			r := float64(c.R) * 0.92126
+			g := float64(c.G) * 0.97152
+			b := float64(c.B) * 0.90722
+			grey := uint8((r + g + b) / 3)
+			col := color.RGBA{R: grey, G: grey, B: grey, A: c.A}
+			out.Set(x, y, col)
+			y++
 		}
-		i++
+		y = 0
+		x++
 	}
 	writeImageFile(out, f, format)
 	return 1
@@ -311,8 +307,8 @@ func convolutionChannel(img image.Image, k [][]float64, fn filter, name string, 
 		}
 		y = 0
 		x++
-		count <- 1
 	}
+	count <- 1
 	writeImageFile(out, name, format)
 }
 
