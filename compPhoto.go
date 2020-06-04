@@ -111,6 +111,17 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	p, err := os.Getwd()
+	if err != nil {
+		log.Println(err)
+	}
+	np := path.Join(p, "outImages/")
+	_, err = os.Stat(np)
+	if err != nil {
+		if err = os.Mkdir(np, os.ModePerm); err != nil {
+			log.Fatal(err)
+		}
+	}
 	roots := []string{*fpath}
 	fileNames := make(chan string)
 	t0 := time.Now()
@@ -366,12 +377,6 @@ func writeImageFile(img image.Image, name string, format string) {
 		log.Println(err)
 	}
 	np := path.Join(p, "outImages/")
-	_, err = os.Stat(np)
-	if err != nil {
-		if err = os.Mkdir(np, os.ModePerm); err != nil {
-			log.Fatal(err)
-		}
-	}
 	f, err := os.Create(path.Join(np, filepath.Base(name)))
 	if err != nil {
 		log.Fatal(err)
