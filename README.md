@@ -17,8 +17,11 @@ This project attempts to act as a command-line utility, image filter. The progra
 	Custom (3x3)
 		</ol>
 To maxize this utility, it is best to run against
-large quantaties of images. This utility will spawned a thread
-(goroutine) per each image using all available system resources.
+large batch of images. This utility will spawned a thread
+(goroutine) per each image. The more resources available the 
+faster the computation should be. This project benefits from
+being embarrassingly parallel, and should scale linearly as the
+amount of parallelism increases.
 </p>
 
 <p>
