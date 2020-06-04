@@ -99,7 +99,7 @@ func Gray(img image.Image, f string, format string) int {
 
 var sema = make(chan struct{}, 20)
 var fpath = flag.String("p", ".", "path to single image or directory with images")
-var operation = flag.String("f", "", "Available kernel's: \n[LRTB]Sobel\nBlur\nSharp\nOutline\nIdentity\nEmboss\nAvailable Image Transformation:\nGrayScale")
+var operation = flag.String("f", "", "Available kernel's: \n[LRTB]Sobel\nBlur\nGaussian\nSharp\nOutline\nIdentity\nEmboss\nAvailable Image Transformation:\nGrayScale")
 var runTime = flag.Int("r", 1, "times to run the given convolution kernel")
 var custom = flag.String("c", "", "Use custom 3x3 matrix. Ex: -c '3 2 -1 8 9 2 1 -9 1' ")
 
